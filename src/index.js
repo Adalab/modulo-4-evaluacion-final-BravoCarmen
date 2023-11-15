@@ -3,6 +3,9 @@
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+require('dotenv').config();
 
 //arrancar el servidor
 
@@ -16,15 +19,23 @@ app.use(express.json());
 //conexion con mi bd: MYSQL
 async function getConnection() {
   const connection = await mysql.createConnection({
-    host: 'localhost',
-    user: 'root',
-    password: '',
-    database: 'taller_db',
+    host: process.env.host,
+    user: process.env.user,
+    password: process.env.password,
+    database: process.env.database,
   });
+  await connection.connect();
+  console.log(
+    `Conexión establecida con la base de datos (identificador=${connection.threadId})`
+  );
 
-  connection.connect();
   return connection;
 }
+
+const generateToken = (payload) => {
+  const token = jwt.sign(payload, 'secreto', { expiresIn: '12h' });
+  return token;
+};
 
 const port = process.env.PORT || 4001;
 app.listen(port, () => {
@@ -33,7 +44,7 @@ app.listen(port, () => {
 
 //endpoints
 
-//OBTENER TODAS LOS CLIENTES (punto 2)
+//OBTENER TODOS LOS CLIENTES
 app.get('/clientes', async (req, res) => {
   let query = 'SELECT * FROM clientes';
 
@@ -48,7 +59,7 @@ app.get('/clientes', async (req, res) => {
   });
 });
 
-//CREAR UN NUEVO CLIENTE (punto 1)
+//CREAR UN NUEVO CLIENTE
 app.post('/clientes', async (req, res) => {
   const dataClientes = req.body;
   const { Nombre, Apellido, Telefono, Vehiculo, Matricula } = dataClientes;
@@ -72,7 +83,7 @@ app.post('/clientes', async (req, res) => {
   });
 });
 
-//ACTUALIZAR UN CLIENTE (punto3)
+//ACTUALIZAR UN CLIENTE
 app.put('/clientes/:id', async (req, res) => {
   const dataClientes = req.body;
   const { Nombre, Apellido, Telefono, Vehiculo, Matricula } = dataClientes;
@@ -98,17 +109,71 @@ app.put('/clientes/:id', async (req, res) => {
   });
 });
 
-//ELIMINAR UN CLIENTE (punto4)
+//ELIMINAR UN CLIENTE
 app.delete('/clientes/:id', async (req, res) => {
-  const idCliente = req.params.id;
+  try {
+    const idCliente = req.params.id;
+    let sql = 'DELETE FROM clientes WHERE id = ?;';
 
-  let sql = 'DELETE FROM clientes WHERE id = ?;';
+    const conn = await getConnection();
+
+    const [results] = await conn.query(sql, [idCliente]);
+    res.json({
+      success: true,
+      message: 'Eliminado correctamente',
+    });
+  } catch (error) {
+    res.json({
+      success: false,
+      message: 'Error, no se ha podido eliminar',
+    });
+  }
+});
+
+//REGISTRO
+
+app.post('/register', async (req, res) => {
+  const email = req.body.email;
+  const nombre = req.body.nombre;
+  const password = req.body.password;
+
+  const passwordHashed = await bcrypt.hash(password, 5);
+
+  const sql = 'INSERT INTO usuarios(email, nombre, password) VALUES (?, ?, ?)';
 
   const conn = await getConnection();
 
-  const [results] = await conn.query(sql, [idCliente]);
+  const [results] = await conn.query(sql, [email, nombre, passwordHashed]);
+  conn.end();
   res.json({
     success: true,
-    message: 'Eliminado correctamente',
+    id: results.insertId,
   });
+});
+
+//LOGIN
+app.post('/login', async (req, res) => {
+  const nombre = req.body.nombre;
+  const password = req.body.password;
+
+  const sql = 'SELECT * FROM usuarios WHERE nombre = ?';
+
+  const conn = await getConnection();
+
+  const [users] = await conn.query(sql, [nombre]);
+  const user = users[0];
+
+  const isOkPassword =
+    user === null ? false : await bcrypt.compare(password, user.password);
+
+  if (!(isOkPassword && user)) {
+    return res.json({ success: false, error: 'Error' });
+  }
+  const infoToken = {
+    username: user.nombre,
+    id: user.id,
+  };
+
+  const token = generateToken(infoToken);
+  res.json({ success: true, token, username: user.nombre });
 });
