@@ -11,8 +11,6 @@ require('dotenv').config();
 
 const app = express();
 
-//configurar
-
 app.use(cors());
 app.use(express.json());
 
